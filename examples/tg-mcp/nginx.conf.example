@@ -1,6 +1,28 @@
-# /etc/nginx/sites-available/tg-mcp — боевой конфиг, обезличено.
-# Подставь: tg-mcp.example.com, <SECRET> (openssl rand -hex 16), <TOKEN> (выдаёт /setup).
+# /etc/nginx/sites-available/tg-mcp (или /etc/nginx/conf.d/tg-mcp.conf) — боевой конфиг, обезличено.
+# Подставь: tg-mcp.example.com, <SECRET> (openssl rand -hex 16), <TOKEN> (выдаёт /setup), <YOUR_IP>.
 # SSL-блоки добавит certbot: certbot --nginx -d tg-mcp.example.com
+# (Или настрой self-signed сертификат на 443 порту, если используешь Cloudflare SSL Full).
+
+# Cloudflare Proxy (опционально, если включено оранжевое облако Cloudflare):
+# Чтобы allow <YOUR_IP> в /setup корректно проверял реальный IP посетителя, а не IP Cloudflare,
+# добавь в http-контекст nginx (например, /etc/nginx/conf.d/cloudflare.conf):
+#   set_real_ip_from 173.245.48.0/20;
+#   set_real_ip_from 103.21.244.0/22;
+#   set_real_ip_from 103.22.200.0/22;
+#   set_real_ip_from 103.31.4.0/22;
+#   set_real_ip_from 141.101.64.0/18;
+#   set_real_ip_from 108.162.192.0/18;
+#   set_real_ip_from 190.93.240.0/20;
+#   set_real_ip_from 188.114.96.0/20;
+#   set_real_ip_from 197.234.240.0/22;
+#   set_real_ip_from 198.41.128.0/17;
+#   set_real_ip_from 162.158.0.0/15;
+#   set_real_ip_from 104.16.0.0/13;
+#   set_real_ip_from 104.24.0.0/14;
+#   set_real_ip_from 172.64.0.0/13;
+#   set_real_ip_from 131.0.72.0/22;
+#   real_ip_header CF-Connecting-IP;
+
 server {
     server_name tg-mcp.example.com;
     listen 80;  # certbot перепишет на 443 + redirect
@@ -19,6 +41,20 @@ server {
         chunked_transfer_encoding on;
     }
 
+    # Закрываем /setup от чужих (логин чужого аккаунта на твоём сервере)
+    location /setup {
+        allow <YOUR_IP>;
+        allow 127.0.0.1;
+        deny all;
+        proxy_pass http://127.0.0.1:8810;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8810;
         proxy_http_version 1.1;
@@ -29,7 +65,4 @@ server {
         proxy_read_timeout 3600s;
         chunked_transfer_encoding on;
     }
-
-    # Рекомендуется: закрыть /setup от чужих (логин чужого аккаунта на твоём сервере)
-    # location /setup { allow <YOUR_IP>; deny all; proxy_pass http://127.0.0.1:8810; }
 }

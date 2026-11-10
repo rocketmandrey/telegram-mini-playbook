@@ -40,6 +40,35 @@ cat ~/.ssh/id_ed25519.pub        # это ПУБЛИЧНАЯ часть — её
 - **публичный IPv4** — обязателен (без него не будет ни SSH, ни HTTPS для телефона);
 - вставь SSH-ключ из блока выше, если панель предложит.
 
+### 💡 Микро-серверы и Free Tier (Oracle Cloud, 1 ГБ RAM, 1/8 vCPU) — важный тюнинг
+
+Если ты берёшь минимальный тариф (1 ГБ RAM) или бесплатный инстанс вроде **Oracle Cloud Free Tier** (`VM.Standard.E2.1.Micro`, 1 ГБ RAM, 0.125 OCPU AMD):
+1. **Подключи Swap (2 ГБ) ДО установки докера**:
+   ```bash
+   fallocate -l 2G /swapfile && chmod 600 /swapfile
+   mkswap /swapfile && swapon /swapfile
+   echo '/swapfile none swap sw 0 0' >> /etc/fstab
+   ```
+   Без swap установка тяжелых пакетов или сборка контейнера вызовет Out-Of-Memory и сервер зависнет.
+2. **Дай приоритет SSH-демону (защита от разрыва связи и таймаутов)**:
+   При пиковых нагрузках (например, при парсинге репозиториев) микро-CPU уходит в 100%, и гипервизор может троттлить сервер так, что SSH перестаёт отвечать («Connection timed out during banner exchange»). Чтобы связь всегда оставалась:
+   ```bash
+   mkdir -p /etc/systemd/system/sshd.service.d
+   cat << 'EOF' > /etc/systemd/system/sshd.service.d/override.conf
+   [Service]
+   Nice=-10
+   CPUWeight=1000
+   EOF
+   systemctl daemon-reload && systemctl restart sshd
+   ```
+3. **На Oracle Linux / RHEL ставь пакеты экономно**:
+   Не давай `dnf` парсить все внешние репозитории разом — это грузит слабый процессор на минуты. Ограничивай репозитории:
+   `dnf install -y docker-ce ... --disablerepo='*' --enablerepo='ol9_baseos_latest,ol9_appstream'`
+4. **Если используешь Cloudflare Proxy (оранжевое облако)**:
+   - В DNS Cloudflare A-запись проксируется автоматически, давая бесплатный SSL.
+   - Nginx должен распознавать заголовок `CF-Connecting-IP`, иначе ограничение `/setup` (`allow <YOUR_IP>`) заблокирует тебя. Подключи `real_ip_header CF-Connecting-IP;` и доверенные IP Cloudflare в nginx (шаблон в `examples/tg-mcp/nginx.conf.example`).
+   - На Nginx настрой самоподписанный сертификат на 443 порту для режима Cloudflare SSL «Full».
+
 **Имя для HTTPS (домен — опционально).** Для доступа с телефона claude.ai требует валидный
 HTTPS, а сертификат выдаётся на имя, не на голые цифры IP. Два пути:
 
@@ -170,6 +199,10 @@ OAuth-поля в Advanced settings не заполняй. (Кастомные �
 | Симптом | Причина | Фикс |
 |---|---|---|
 | Кнопки `/setup` «не работают» | `sqlite3.OperationalError: unable to open database file` — каталог `sessions/` под root, контейнер под uid=1000 | `chown -R 1000:1000 sessions/` |
+| `TemplateNotFound: 'setup.html'` на `/setup` | В пакете `fast-mcp-telegram` 0.42.0 из PyPI пропущены шаблоны | Смонтировать `./templates` в контейнер (уже добавлено в `examples/tg-mcp/`) |
+| `ModuleNotFoundError: No module named 'httpx'` | В зависимостях 0.42.0 на PyPI пропущен `httpx` | Добавить `httpx` в `pip install` (уже в `examples/tg-mcp/docker-compose.yml`) |
+| SSH зависает / таймаут на микро-VPS (Oracle Cloud) | 100% CPU троттлится гипервизором и нехватка RAM | Подключить 2 ГБ swap, повысить приоритет sshd (`Nice=-10`, см. §0) |
+| 403 Forbidden на `/setup` через Cloudflare | Nginx проверяет IP Cloudflare вместо твоего реального | Настроить `CF-Connecting-IP` и `set_real_ip_from` (см. `nginx.conf.example`) |
 | QR-логин падает: «password is required» | QR-флоу не поддерживает 2FA-пароль | логиниться по номеру телефона |
 | `initialize` без токена отвечает 200 | норма: auth проверяется на `tools/call` | проверь, что `tools/call` без токена режется |
 | Сессия «умерла насовсем» (`AuthKeyDuplicated`) | один session-файл в двух процессах | у MCP — СВОЯ сессия, не переиспользуй чужую |

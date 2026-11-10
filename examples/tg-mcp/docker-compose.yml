@@ -9,7 +9,8 @@ services:
       dockerfile_inline: |
         FROM python:3.12-slim
         # версия запинена: апстрим закрылся без предупреждения — обновлять осознанно
-        RUN pip install --no-cache-dir fast-mcp-telegram==0.42.0 && useradd -m -u 1000 appuser
+        # httpx обязателен (в зависимостях 0.42.0 на PyPI пропущен)
+        RUN pip install --no-cache-dir fast-mcp-telegram==0.42.0 httpx && useradd -m -u 1000 appuser
         USER appuser
         ENV PYTHONUNBUFFERED=1
         CMD ["fast-mcp-telegram"]
@@ -26,8 +27,12 @@ services:
       - "127.0.0.1:8810:8000"   # наружу НЕ открывать — только через nginx
     volumes:
       - ./sessions:/home/appuser/.config/fast-mcp-telegram
+      - ./templates:/usr/local/lib/python3.12/site-packages/src/templates:ro
     restart: unless-stopped
-    mem_limit: 256m
+    # Лимиты для стабильности на микро-серверах (1 ГБ RAM / 1 vCPU)
+    mem_limit: 300m
+    cpus: 0.60
+    cpu_shares: 512
     healthcheck:
       # python вместо curl: в python:3.12-slim curl'а нет
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
